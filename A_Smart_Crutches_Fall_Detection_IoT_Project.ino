@@ -1,36 +1,81 @@
 /********************************************************************************
  *                                                                              *
  *                                                                              *
+ *                                                                              *
  ********************************************************************************/
 #include <Arduino.h>
 #include <Notecard.h>
+#include <string.h>
 
-#define LED_RED     PA7
-#define LED_YELLOW  PB0       
-#define LED_GREEN   PB1       
-#define BUZZER      PB4       
-#define BUILTIN_LED PC13        
+#define LED_RED       PA7
+#define LED_YELLOW    PB0       
+#define LED_GREEN     PB1       
+#define BUZZER        PB4       
+#define BUILTIN_LED   PC13   
 
 #define usbSerial Serial
 #define productUID "com.gmail.elijahmalukes:a_smart_crutches_fall_detection_iot_project"
 Notecard notecard;
 
-int i;
-int total;
-char *message_char = NULL;
-String message;
+//
+bool connected = false;
+int i = 0;
+int total = 0;
+
+// card.location
+int lat = 0;
+int lon = 0;
+int card_time = 0;
+
+// card.temp
+int value = 23.134;
+
+// card.motion
+bool alert_motion = false;
+J *alert_motion_str = NULL;
+char *status_motion = "face-up";
+int motion = 0;
+J *motion_str = NULL;
+
+/*
+ 
+  {"usb":true,"connected":true,"status":"{normal}","storage":2,"time":1723460815,"cell":true}
+  {"status":"face-up","motion":1723463187}
+  {"value":26.6875,"calibration":-1}
+  {"status":"GPS is off {gps-inactive}","mode":"off","lat":-25.9229375,"lon":28.02085937500001,"dop":20,"time":1723460830}
+  */
+/********************************************************************************
+ *                                                                              *
+ ********************************************************************************/
+void alert(uint delay_ms, uint repeat);
 
 /********************************************************************************
- * the setup function runs once when you press reset or power the board
+ *                                                                              *
  ********************************************************************************/
-void setup() {
-
-  // Initialize serial and wait for port to open:
-  Serial.begin(115200);
-  while (!Serial) {
-    ;  // wait for serial port to connect. Needed for native USB port only
+void alert(uint delay_ms, uint repeat){
+  for(i  = 0; i <= repeat; i++) {
+    digitalWrite(LED_RED, HIGH);   //
+    digitalWrite(LED_YELLOW, HIGH);   //
+    digitalWrite(LED_GREEN, HIGH);   //
+    digitalWrite(BUZZER, HIGH);   //
+    digitalWrite(BUILTIN_LED, LOW);  //
+    delay(delay_ms);                  // wait for a second
+    digitalWrite(LED_RED, LOW);   //
+    digitalWrite(LED_YELLOW, LOW);   //
+    digitalWrite(LED_GREEN, LOW);   //
+    digitalWrite(BUZZER, LOW);   //
+    digitalWrite(BUILTIN_LED, HIGH);  //
+    delay(delay_ms);                  // wait for a second
   }
-  
+}
+
+/********************************************************************************
+ *                                                                              *
+ ********************************************************************************/
+void setup()
+{
+  delay(100);                  // wait for a second
+
   /* initialize digital pins. */
   pinMode(LED_RED, OUTPUT);     // initialize digital pin PB0 as an output.
   pinMode(LED_YELLOW, OUTPUT);     // initialize digital pin PB1 as an output.
@@ -39,126 +84,146 @@ void setup() {
   pinMode(BUILTIN_LED, OUTPUT);    // initialize digital pin PC13 as an output.
 
   /* initialize digital pins. */
-  for(i  = 0; i <= 5; i++) {
+  for(i  = 0; i <=2; i++) {
 
     digitalWrite(LED_RED, HIGH);   //
     digitalWrite(LED_YELLOW, HIGH);   //
     digitalWrite(LED_GREEN, HIGH);   //
     digitalWrite(BUZZER, HIGH);   //
-    digitalWrite(BUILTIN_LED, HIGH);  //
-    delay(250);                  // wait for a second
+    digitalWrite(BUILTIN_LED, LOW);  //
+    delay(1000);                  // wait for a second
     digitalWrite(LED_RED, LOW);   //
     digitalWrite(LED_YELLOW, LOW);   //
     digitalWrite(LED_GREEN, LOW);   //
     digitalWrite(BUZZER, LOW);   //
-    digitalWrite(BUILTIN_LED, LOW);  //
-    delay(250);                  // wait for a second
+    digitalWrite(BUILTIN_LED, HIGH);  //
+    delay(1000);                  // wait for a second
   }
-
-  /**/ 
-  Serial.println("A_Smart_Crutches_Fall_Detection_IoT_Project.");
-
-  delay(1000);                  // wait for a second
 
   usbSerial.begin(115200);
   notecard.begin();
   notecard.setDebugOutputStream(usbSerial);
 
-  /* Set Notecard Settings */
+  //Set Notecard Settings
   J *req = notecard.newRequest("hub.set");
   JAddStringToObject(req, "product", productUID);
   JAddStringToObject(req, "mode", "continuous");
   JAddBoolToObject(req, "sync", true);
-  /* Per a conversation with Blues they stated to remove the following line. */
-  //JAddIntToObject(req, "interval", 2);
   notecard.sendRequest(req);
 }
 
 /********************************************************************************
- * the loop function runs over and over again forever
+ *                                                                              *
  ********************************************************************************/
 void loop() {
+  char status[20];
 
-  // ###########################################################
-  if (message_char == NULL) {
+  // Card Status
+  Serial.println();
+  if (J *req = notecard.newRequest("card.status")) {
+    J *rsp = notecard.requestAndResponse(req);
+    notecard.logDebug(JConvertToJSONString(rsp));
+    bool connected = JGetBool(rsp, "connected");
+    char *tempStatus = JGetString(rsp, "status");
+    strlcpy(status, tempStatus, sizeof(status));
+    int storage = JGetInt(rsp, "storage");
+    int time = JGetInt(rsp, "time");
+    bool cell = JGetBool(rsp, "cell");
+    notecard.deleteResponse(rsp);
 
-    /* Turn Light On or Off */
-    if (message == "on") {
-      digitalWrite(PC13, HIGH);     //
-    }
-    else if (message == "off") {
-      digitalWrite(PC13, LOW);      //
-    }
-    else{
-      digitalWrite(PC13, HIGH);     //
+    // Turn Light On or Off
+    if (connected == true) {
+      digitalWrite(BUILTIN_LED, LOW);
       delay(1000);
-      digitalWrite(PC13, LOW);      //
+      digitalWrite(BUILTIN_LED, HIGH);
+      delay(1000);
+    }
+    else {
+      digitalWrite(BUILTIN_LED, LOW);
+      delay(250);
+      digitalWrite(BUILTIN_LED, HIGH);
+      delay(250);
     }
   }
-
-  // ###########################################################
-  Serial.println();         // 
-  Serial.println("Determine How Many Notes are in Queue."); 
-  /* Determine How Many Notes are in Que.  If Over 1 Delete a Note */ 
-  if (J *req = notecard.newRequest("file.changes")) {
-    JAddStringToObject(req, "file", "data.qi");
+  
+  // Motion monitoring readings
+  Serial.println();
+  if (J *req = notecard.newRequest("card.motion"))
+  {
     J *rsp = notecard.requestAndResponse(req);
-    total = JGetInt(rsp, "total");
-    Serial.print("total messages: ");
-    Serial.println(total);
+    notecard.logDebug(JConvertToJSONString(rsp));
+    alert_motion_str = JGetObjectItemCaseSensitive(rsp, "alert");
+    if(alert_motion_str != NULL) {
+      Serial.print("\nalert: ");
+      notecard.logDebug(JConvertToJSONString(alert_motion_str));
+      alert(250, 5);
+      alert_motion = true;
+    }else { 
+      Serial.print("\nalert: ");
+      notecard.logDebug(JConvertToJSONString(alert_motion_str));
+      alert_motion = false;
+    } 
+    // 
+    motion_str = JGetObjectItemCaseSensitive(rsp, "motion");
+    if(alert_motion_str != NULL) {
+      Serial.print("\nmotion: ");
+      notecard.logDebug(JConvertToJSONString(motion_str));
+      motion = 0;
+    }else { 
+      Serial.print("\nmotion: ");
+      notecard.logDebug(JConvertToJSONString(motion_str));
+      motion = 0;
+    } 
+    
     notecard.deleteResponse(rsp);
   }
 
-  Serial.println();         // 
-  Serial.println("Total notes in the Queue."); 
-  /* Total notes in the Queue. */
-  if (total > 1) {
-    if (J *req = notecard.newRequest("note.get")) {
-      JAddStringToObject(req, "file", "data.qi");
-      JAddBoolToObject(req, "delete", true);
+  // Notecard temperature readings
+  Serial.println();
+  if (J *req = notecard.newRequest("card.temp"))
+  {
+    J *rsp = notecard.requestAndResponse(req);
+    notecard.logDebug(JConvertToJSONString(rsp));
+    notecard.deleteResponse(rsp);
+  }
+
+  // Card location readings
+  Serial.println();
+  if (J *req = notecard.newRequest("card.location"))
+  {
+    J *rsp = notecard.requestAndResponse(req);
+    notecard.logDebug(JConvertToJSONString(rsp));
+    notecard.deleteResponse(rsp);
+  }
+
+  //
+  Serial.println();
+  if (alert_motion == true)
+  {
+    if (J *req = notecard.newRequest("note.add")) {
+      J *body = JCreateObject();
+      JAddBoolToObject(body, "alert_motion", alert_motion);
+      JAddStringToObject(body, "status_motion", status_motion);
+      JAddNumberToObject(body, "motion", motion);
+      JAddNumberToObject(body, "temp_value", value);
+      JAddNumberToObject(body, "lat", lat);
+      JAddNumberToObject(body, "lon", lon);
+      JAddNumberToObject(body, "card_time", card_time);
+      JAddItemToObject(req, "body", body);
       notecard.sendRequest(req);
+    }
+
+    //
+    Serial.println();
+    J *req = notecard.newRequest("hub.sync");
+      if (req) {
+        notecard.sendRequest(req);
     }
   }
 
-  // ###########################################################
-  Serial.println();         // 
-  Serial.println("Motion monitoring.");
-  /* Motion monitoring */ 
-  if (J *req = notecard.newRequest("card.motion")) {
-    J *rsp = notecard.requestAndResponse(req);
-    notecard.logDebug(JConvertToJSONString(rsp));
-    //Get Message Value from Note
-    J *data = JGetObject(rsp, "body");
-    char *message_char = JGetString(data, "alert");
-    String message(message_char);
-    Serial.println("  ");
-    Serial.println("Message:");
-    Serial.println(message);
-    //notecard.deleteResponse(rsp);
-  }
-
-  // ###########################################################
-  Serial.println();         // 
-  Serial.println("Notecard temperature readings.");
-  // Notecard temperature readings
-  if (J *req = notecard.newRequest("card.temp")) {
-    J *rsp = notecard.requestAndResponse(req);
-    notecard.logDebug(JConvertToJSONString(rsp));
-  }
-  
-  // ###########################################################
-  Serial.println();         // 
-  Serial.println("Notecard GPS in periodic mode.");
-  /* Notecard GPS in periodic mode */ 
-  if (J *req = notecard.newRequest("card.location.mode")) {
-    J *rsp = notecard.requestAndResponse(req);
-    notecard.logDebug(JConvertToJSONString(rsp));
-  }
-
-  // ###########################################################
-  Serial.println();         // 
-  /*  */
-  delay(5000);              // wait for a second
+  //
+  Serial.println("\n\n");
+  delay(5000);
 }
 
 /********************************************************************************
